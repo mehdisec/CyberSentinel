@@ -1,0 +1,28 @@
+[Unit]
+Description=CyberSentinel - Linux Cybersecurity Monitoring & Defense Daemon
+Documentation=https://github.com/cybersentinel/cybersentinel
+After=network.target network-online.target systemd-journald.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/cybersentinel
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/cybersentinel/venv/bin/python3 -m uvicorn backend.app.main:app --host 0.0.0.0 --port 9090
+Restart=always
+RestartSec=3
+
+# Linux Security Hardening & Capabilities
+# Grant minimal required kernel capabilities: CAP_NET_ADMIN (firewall), CAP_KILL (kill sessions), CAP_DAC_READ_SEARCH (auth.log/proc inspection)
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_KILL CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_KILL CAP_DAC_READ_SEARCH
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/etc/cybersentinel /opt/cybersentinel
+NoNewPrivileges=no
+KillMode=mixed
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

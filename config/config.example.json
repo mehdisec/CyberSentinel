@@ -1,0 +1,43 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 9090,
+    "auth_enabled": false,
+    "admin_token": "aegis-secret-soc-key-change-me"
+  },
+  "firewall": {
+    "backend": "auto",
+    "whitelist": [
+      "127.0.0.1",
+      "::1",
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16"
+    ]
+  },
+  "alerts": {
+    "failed_logins_threshold_1h": 10,
+    "bandwidth_spike_mbps": 100,
+    "threat_score_high": 65
+  },
+  "notifications": {
+    "enabled": false,
+    "discord_webhook_url": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "generic_webhook_url": ""
+  },
+  "fim": {
+    "baseline_file": "config/fim_baseline.json",
+    "paths": [
+      "/etc/passwd",
+      "/etc/shadow",
+      "/etc/sudoers",
+      "/etc/ssh/sshd_config",
+      "/etc/hosts",
+      "/etc/crontab",
+      "/etc/pam.d/common-auth",
+      "/root/.ssh/authorized_keys"
+    ]
+  }
+}

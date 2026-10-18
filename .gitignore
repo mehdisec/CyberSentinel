@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Project Runtime State & Node/Environment Configurations
+.env
+.env.local
+.env.*.local
+*.log
+logs/
+
+# Local Machine State Configurations
+config/config.json
+config/fim_baseline.json
+
+# Legacy single-file backup
+legacy_backup/
+
+# Operating System Artifacts
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
