@@ -116,14 +116,36 @@ if [[ -n "${LOCAL_SRC}" && "${LOCAL_SRC}" != "${TARGET_DIR}" ]]; then
     if [[ -f "${LOCAL_SRC}/install.sh" ]]; then
         cp "${LOCAL_SRC}/install.sh" "${TARGET_DIR}/"
     fi
-elif [[ -z "${LOCAL_SRC}" && ! -f "${TARGET_DIR}/backend/app/main.py" ]]; then
-    echo -e "${BLUE}[*] Fetching CyberSentinel repository from GitHub (${REPO_URL})...${NC}"
+elif [[ -z "${LOCAL_SRC}" ]]; then
+    echo -e "${BLUE}[*] Fetching latest CyberSentinel release from GitHub (${REPO_URL})...${NC}"
+    TMP_SRC="/tmp/cybersentinel_fetch_$$"
+    rm -rf "${TMP_SRC}"
+    mkdir -p "${TMP_SRC}"
+
+    FETCHED=false
     if command -v git &>/dev/null; then
-        git clone --depth 1 "${REPO_URL}" "${TARGET_DIR}"
-    else
-        echo -e "${BLUE}[*] git not found; downloading archive tarball via curl...${NC}"
-        curl -fsSL "${TARBALL_URL}" | tar -xz --strip-components=1 -C "${TARGET_DIR}"
+        if git clone --depth 1 "${REPO_URL}" "${TMP_SRC}" >/dev/null 2>&1; then
+            FETCHED=true
+        fi
     fi
+
+    if [[ "${FETCHED}" != "true" ]]; then
+        echo -e "${BLUE}[*] Downloading release archive tarball via curl...${NC}"
+        curl -fsSL "${TARBALL_URL}" | tar -xz --strip-components=1 -C "${TMP_SRC}"
+    fi
+
+    echo -e "${BLUE}[*] Deploying latest files to ${TARGET_DIR}...${NC}"
+    cp -r "${TMP_SRC}/backend" "${TARGET_DIR}/"
+    cp -r "${TMP_SRC}/frontend" "${TARGET_DIR}/"
+    cp -r "${TMP_SRC}/config" "${TARGET_DIR}/"
+    cp "${TMP_SRC}/requirements.txt" "${TARGET_DIR}/"
+    if [[ -d "${TMP_SRC}/scripts" ]]; then
+        cp -r "${TMP_SRC}/scripts" "${TARGET_DIR}/"
+    fi
+    if [[ -f "${TMP_SRC}/install.sh" ]]; then
+        cp "${TMP_SRC}/install.sh" "${TARGET_DIR}/"
+    fi
+    rm -rf "${TMP_SRC}"
 fi
 
 # 4. Setup Dedicated Python Virtual Environment
@@ -194,6 +216,28 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
   }
 }
 EOF
+else
+    echo -e "${BLUE}[*] Ensuring authentication is enabled in existing ${CONFIG_FILE}...${NC}"
+    "${TARGET_DIR}/venv/bin/python3" -c "
+import json, os, secrets, hashlib
+cfg_path = '${CONFIG_FILE}'
+try:
+    with open(cfg_path, 'r') as f:
+        d = json.load(f)
+    srv = d.setdefault('server', {})
+    srv['auth_enabled'] = True
+    if not srv.get('admin_username'):
+        srv['admin_username'] = 'admin'
+    if not srv.get('admin_password_hash'):
+        salt = secrets.token_hex(16)
+        srv['admin_password_salt'] = salt
+        srv['admin_password_hash'] = hashlib.pbkdf2_hmac('sha256', b'admin', salt.encode(), 100000).hex()
+        srv['must_change_password'] = True
+    with open(cfg_path, 'w') as f:
+        json.dump(d, f, indent=2)
+except Exception:
+    pass
+" 2>/dev/null || true
 fi
 
 # 6. Initialize File Integrity Baseline (FIM)

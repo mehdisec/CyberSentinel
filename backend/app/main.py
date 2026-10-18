@@ -70,10 +70,14 @@ if static_path.exists():
 
 @app.get("/", include_in_schema=False)
 async def serve_index():
-    """Serves the main Vue 3 Single Page Application."""
+    """Serves the main Vue 3 Single Page Application with anti-caching headers."""
     index_file = FRONTEND_DIR / "index.html"
     if index_file.exists():
-        return FileResponse(str(index_file))
+        response = FileResponse(str(index_file))
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     return {"message": "CyberSentinel Backend Running. Frontend index.html not found."}
 
 
