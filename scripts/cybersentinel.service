@@ -1,6 +1,6 @@
 [Unit]
 Description=CyberSentinel - Linux Cybersecurity Monitoring & Defense Daemon
-Documentation=https://github.com/cybersentinel/cybersentinel
+Documentation=https://github.com/mehdisec/CyberSentinel
 After=network.target network-online.target systemd-journald.service
 Wants=network-online.target
 

@@ -110,6 +110,7 @@ cybersentinel/
 │           ├── lucide.js               # Lucide SVG Icons
 │           ├── tailwind.js             # Tailwind CSS Engine
 │           └── vue.global.js           # Vue 3 Runtime
+├── install.sh                          # 1-Line automated multi-distro installer
 ├── scripts/
 │   ├── install.sh                      # Production multi-distro setup & systemd automation
 │   ├── cybersentinel.service           # Hardened systemd service unit definition
@@ -126,24 +127,37 @@ cybersentinel/
 
 ## 🚀 Quick Start & Installation
 
-### Option 1: Automated Installation (Recommended)
+### Option 1: One-Command Instant Installation (Recommended)
 
-Clone the repository and run the automated installer as `root` (or with `sudo`):
+Run the single-line installer on any supported Linux machine (**Ubuntu, Debian, RHEL, AlmaLinux, Rocky, CentOS, Fedora, Arch**):
 
 ```bash
-git clone https://github.com/cybersentinel/cybersentinel.git /opt/cybersentinel
-cd /opt/cybersentinel
-sudo bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo bash
 ```
 
-#### What `install.sh` Does Automatically:
-1. **OS Detection:** Detects Debian, Ubuntu, RHEL, AlmaLinux, Rocky Linux, or Fedora.
-2. **Package Setup:** Installs `python3`, `python3-venv`, `nftables`, `iproute2` (`ss`), `procps`, and `curl`.
-3. **Dedicated Directory:** Prepares `/opt/cybersentinel` and runtime configurations in `/etc/cybersentinel/`.
-4. **Isolated Virtualenv:** Creates `/opt/cybersentinel/venv` and installs lightweight dependencies (`fastapi`, `uvicorn`, `pydantic`, `websockets`).
-5. **Initial FIM Baseline:** Automatically builds a SHA-256 baseline snapshot of critical security files.
-6. **Hardened Systemd Unit:** Installs, enables, and starts `/etc/systemd/system/cybersentinel.service`.
-7. **Health Verification:** Verifies the local HTTP and WebSocket endpoints are responding.
+*Or using `wget`:*
+
+```bash
+wget -qO- https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo bash
+```
+
+#### Custom Port or Host (Optional):
+To run on a custom port (e.g. `8080` instead of default `9090`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo CYBERSENTINEL_PORT=8080 bash
+```
+
+---
+
+#### What the Installer Does Automatically:
+1. **OS & Package Manager Detection:** Detects Debian, Ubuntu, RHEL, AlmaLinux, Rocky Linux, Fedora, or Arch.
+2. **Dependency Automation:** Installs `python3`, `python3-pip`, `python3-venv`, `git`, `nftables`, `iproute2` (`ss`), `procps`, and `curl`.
+3. **Dedicated Directory:** Deploys source to `/opt/cybersentinel` and configuration to `/etc/cybersentinel/`.
+4. **Isolated Virtualenv:** Creates `/opt/cybersentinel/venv` and installs lightweight daemon dependencies (`fastapi`, `uvicorn`, `pydantic`, `websockets`).
+5. **Initial FIM Baseline:** Automatically computes a SHA-256 baseline snapshot of critical security files.
+6. **Hardened Systemd Unit:** Configures, enables, and starts `/etc/systemd/system/cybersentinel.service` with minimal capabilities (`CAP_NET_ADMIN`, `CAP_KILL`, `CAP_DAC_READ_SEARCH`).
+7. **Health Verification:** Verifies the local HTTP and WebSocket endpoints are active and healthy.
 
 ---
 
@@ -151,21 +165,59 @@ sudo bash scripts/install.sh
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/cybersentinel/cybersentinel.git
-cd cybersentinel
+git clone https://github.com/mehdisec/CyberSentinel.git /opt/cybersentinel
+cd /opt/cybersentinel
 
-# 2. Create and activate virtual environment
+# 2. Run local installer
+sudo bash install.sh
+```
+
+Or run purely in development mode without systemd:
+
+```bash
+# Create and activate virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Install dependencies
+# Install dependencies
 pip install -r requirements.txt
 
-# 4. Copy configuration template
-cp config/config.example.json config/config.json
-
-# 5. Launch development server
+# Launch development server with auto-reload
 python3 -m uvicorn backend.app.main:app --host 0.0.0.0 --port 9090 --reload
+```
+
+---
+
+### 🔄 Updating CyberSentinel
+
+To update to the latest version, re-run the 1-liner installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo bash
+```
+
+Or from the installation directory:
+
+```bash
+cd /opt/cybersentinel
+sudo git pull origin main
+sudo systemctl restart cybersentinel.service
+```
+
+---
+
+### 🗑️ Uninstallation
+
+To cleanly remove CyberSentinel and its systemd service:
+
+```bash
+sudo bash /opt/cybersentinel/install.sh --uninstall
+```
+
+*Or via one-liner:*
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo bash -s -- --uninstall
 ```
 
 ---

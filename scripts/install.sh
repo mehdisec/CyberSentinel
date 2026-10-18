@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# CyberSentinel &mdash; Linux Cybersecurity Monitoring & Defense Panel Installer
+# CyberSentinel — Linux Cybersecurity Monitoring & Defense Panel Installer
 # Production Deployment Automation for Ubuntu, Debian, RHEL, AlmaLinux & Rocky
+# One-Line Install: curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install.sh | sudo bash
 # ==============================================================================
 
 set -euo pipefail
@@ -15,10 +16,12 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-TARGET_DIR="/opt/cybersentinel"
+TARGET_DIR="${CYBERSENTINEL_DIR:-/opt/cybersentinel}"
 SERVICE_NAME="cybersentinel.service"
 PORT="${CYBERSENTINEL_PORT:-9090}"
 BIND_HOST="${CYBERSENTINEL_HOST:-0.0.0.0}"
+REPO_URL="${CYBERSENTINEL_REPO:-https://github.com/mehdisec/CyberSentinel.git}"
+TARBALL_URL="https://github.com/mehdisec/CyberSentinel/archive/refs/heads/main.tar.gz"
 
 echo -e "${CYAN}${BOLD}"
 cat << "EOF"
@@ -30,6 +33,26 @@ cat << "EOF"
      /____/  Linux Cybersecurity Monitoring & Defense Daemon
 EOF
 echo -e "${NC}"
+
+# Handle Uninstallation
+if [[ "${1:-}" == "--uninstall" || "${1:-}" == "uninstall" ]]; then
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}[ERROR] Uninstallation must be executed as root (or with sudo).${NC}"
+        exit 1
+    fi
+    echo -e "${YELLOW}[*] Stopping and disabling ${SERVICE_NAME}...${NC}"
+    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+    rm -f "/etc/systemd/system/${SERVICE_NAME}"
+    systemctl daemon-reload
+
+    echo -e "${YELLOW}[*] Removing application files from ${TARGET_DIR}...${NC}"
+    rm -rf "${TARGET_DIR}"
+
+    echo -e "${GREEN}${BOLD}[SUCCESS] CyberSentinel service and application files removed.${NC}"
+    echo -e "Note: Configuration directory /etc/cybersentinel preserved. (Run 'rm -rf /etc/cybersentinel' to purge completely)."
+    exit 0
+fi
 
 # 1. Root Privilege Verification
 if [[ $EUID -ne 0 ]]; then
@@ -44,39 +67,73 @@ if command -v apt-get &>/dev/null; then
     echo -e "${GREEN}[+] Detected Debian / Ubuntu subsystem.${NC}"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq python3 python3-pip python3-venv nftables iproute2 curl procps >/dev/null
+    apt-get install -y -qq python3 python3-pip python3-venv git nftables iproute2 curl procps >/dev/null
 elif command -v dnf &>/dev/null; then
     echo -e "${GREEN}[+] Detected RHEL / AlmaLinux / Rocky / Fedora subsystem (dnf).${NC}"
-    dnf install -y -q python3 python3-pip nftables iproute procps-ng curl >/dev/null
+    dnf install -y -q python3 python3-pip git nftables iproute procps-ng curl >/dev/null
 elif command -v yum &>/dev/null; then
     echo -e "${GREEN}[+] Detected CentOS / RHEL (yum).${NC}"
-    yum install -y -q python3 python3-pip nftables iproute procps-ng curl >/dev/null
+    yum install -y -q python3 python3-pip git nftables iproute procps-ng curl >/dev/null
+elif command -v pacman &>/dev/null; then
+    echo -e "${GREEN}[+] Detected Arch Linux subsystem (pacman).${NC}"
+    pacman -Sy --noconfirm python python-pip git nftables iproute2 procps-ng curl >/dev/null
+elif command -v zypper &>/dev/null; then
+    echo -e "${GREEN}[+] Detected openSUSE subsystem (zypper).${NC}"
+    zypper --non-interactive install python3 python3-pip git nftables iproute2 procps curl >/dev/null
 else
-    echo -e "${YELLOW}[!] Warning: Unknown package manager. Please ensure python3, venv, nftables, and ss are installed.${NC}"
+    echo -e "${YELLOW}[!] Warning: Unknown package manager. Please ensure python3, venv, git, nftables, and ss are installed.${NC}"
 fi
 
-# 3. Setup Installation Directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 3. Setup Installation Directory & Acquire Project Source Files
+SCRIPT_DIR=""
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 echo -e "${BLUE}[*] Preparing destination directory: ${TARGET_DIR}${NC}"
 mkdir -p "${TARGET_DIR}"
 mkdir -p "/etc/cybersentinel"
 
-if [[ "${SCRIPT_DIR}" != "${TARGET_DIR}" ]]; then
-    echo -e "${BLUE}[*] Syncing files from ${SCRIPT_DIR} to ${TARGET_DIR}...${NC}"
-    cp -r "${SCRIPT_DIR}/backend" "${TARGET_DIR}/"
-    cp -r "${SCRIPT_DIR}/frontend" "${TARGET_DIR}/"
-    cp -r "${SCRIPT_DIR}/config" "${TARGET_DIR}/"
-    cp "${SCRIPT_DIR}/requirements.txt" "${TARGET_DIR}/"
-    if [[ -d "${SCRIPT_DIR}/scripts" ]]; then
-        cp -r "${SCRIPT_DIR}/scripts" "${TARGET_DIR}/"
+# Check if running locally with source code already present
+LOCAL_SRC=""
+if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/backend/app/main.py" ]]; then
+    LOCAL_SRC="${SCRIPT_DIR}"
+elif [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/../backend/app/main.py" ]]; then
+    LOCAL_SRC="$(cd "${SCRIPT_DIR}/.." && pwd)"
+elif [[ -f "${PWD}/backend/app/main.py" ]]; then
+    LOCAL_SRC="${PWD}"
+fi
+
+if [[ -n "${LOCAL_SRC}" && "${LOCAL_SRC}" != "${TARGET_DIR}" ]]; then
+    echo -e "${BLUE}[*] Deploying from local source: ${LOCAL_SRC}...${NC}"
+    cp -r "${LOCAL_SRC}/backend" "${TARGET_DIR}/"
+    cp -r "${LOCAL_SRC}/frontend" "${TARGET_DIR}/"
+    cp -r "${LOCAL_SRC}/config" "${TARGET_DIR}/"
+    cp "${LOCAL_SRC}/requirements.txt" "${TARGET_DIR}/"
+    if [[ -d "${LOCAL_SRC}/scripts" ]]; then
+        cp -r "${LOCAL_SRC}/scripts" "${TARGET_DIR}/"
+    fi
+    if [[ -f "${LOCAL_SRC}/install.sh" ]]; then
+        cp "${LOCAL_SRC}/install.sh" "${TARGET_DIR}/"
+    fi
+elif [[ -z "${LOCAL_SRC}" && ! -f "${TARGET_DIR}/backend/app/main.py" ]]; then
+    echo -e "${BLUE}[*] Fetching CyberSentinel repository from GitHub (${REPO_URL})...${NC}"
+    if command -v git &>/dev/null; then
+        git clone --depth 1 "${REPO_URL}" "${TARGET_DIR}"
+    else
+        echo -e "${BLUE}[*] git not found; downloading archive tarball via curl...${NC}"
+        curl -fsSL "${TARBALL_URL}" | tar -xz --strip-components=1 -C "${TARGET_DIR}"
     fi
 fi
 
-# 4. Setup Python Virtual Environment
+# 4. Setup Dedicated Python Virtual Environment
 echo -e "${BLUE}[*] Initializing dedicated Python virtual environment...${NC}"
 if [[ ! -d "${TARGET_DIR}/venv" ]]; then
-    python3 -m venv "${TARGET_DIR}/venv"
+    python3 -m venv "${TARGET_DIR}/venv" || {
+        echo -e "${YELLOW}[!] Initial venv creation needed fallback; installing pip bootstrapping...${NC}"
+        python3 -m venv --without-pip "${TARGET_DIR}/venv"
+        curl -fsSL https://bootstrap.pypa.io/get-pip.py | "${TARGET_DIR}/venv/bin/python3"
+    }
 fi
 
 "${TARGET_DIR}/venv/bin/pip" install --upgrade pip -q
@@ -144,12 +201,12 @@ from backend.app.modules.persistence import fim_monitor
 fim_monitor.create_baseline('System installation baseline snapshot')
 " 2>/dev/null || true
 
-# 7. Setup Systemd Service
+# 7. Setup Systemd Service Unit
 echo -e "${BLUE}[*] Configuring systemd unit: /etc/systemd/system/${SERVICE_NAME}...${NC}"
 cat > "/etc/systemd/system/${SERVICE_NAME}" << EOF
 [Unit]
 Description=CyberSentinel - Linux Cybersecurity Monitoring & Defense Daemon
-Documentation=https://github.com/cybersentinel/cybersentinel
+Documentation=https://github.com/mehdisec/CyberSentinel
 After=network.target network-online.target systemd-journald.service
 Wants=network-online.target
 
@@ -208,4 +265,5 @@ echo -e "Local Address:   http://127.0.0.1:${PORT}/"
 echo -e "Config File:     /etc/cybersentinel/config.json"
 echo -e "Service Control: systemctl [status|restart|stop] ${SERVICE_NAME}"
 echo -e "Service Logs:    journalctl -u ${SERVICE_NAME} -f"
+echo -e "Uninstall:       sudo bash ${TARGET_DIR}/install.sh --uninstall"
 echo -e "${CYAN}========================================================================${NC}"
