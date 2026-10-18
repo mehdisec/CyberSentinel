@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from backend.app.core.config import settings
-from backend.app.api.endpoints import router as api_router
+from backend.app.api.endpoints import router as api_router, auth_router
 from backend.app.api.websocket import ws_router, hub
 
 # Setup structured logging
@@ -58,6 +58,7 @@ app.add_middleware(
 )
 
 # Include API and WebSocket routes
+app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(ws_router)
 

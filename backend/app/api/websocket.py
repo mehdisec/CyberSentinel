@@ -3,7 +3,9 @@ import asyncio
 import json
 import logging
 from typing import Set
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from backend.app.core.config import settings
+from backend.app.core.security import is_valid_session
 
 from backend.app.modules.network import (
     bandwidth_tracker,
@@ -94,6 +96,12 @@ async def websocket_live_endpoint(websocket: WebSocket):
     WebSocket endpoint for live dashboard data streaming.
     Streams bandwidth sparklines, system metrics, threat score, and logs.
     """
+    if settings.auth_enabled:
+        token = websocket.query_params.get("token")
+        if not token or not (is_valid_session(token) or (settings.admin_token and token == settings.admin_token)):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
     await hub.connect(websocket)
     try:
         while True:

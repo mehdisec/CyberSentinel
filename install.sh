@@ -150,7 +150,11 @@ if [[ ! -f "${CONFIG_FILE}" ]]; then
   "server": {
     "host": "${BIND_HOST}",
     "port": ${PORT},
-    "auth_enabled": false,
+    "auth_enabled": true,
+    "admin_username": "admin",
+    "admin_password_hash": "",
+    "admin_password_salt": "",
+    "must_change_password": true,
     "admin_token": "${RANDOM_TOKEN}"
   },
   "firewall": {

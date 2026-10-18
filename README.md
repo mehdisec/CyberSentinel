@@ -161,6 +161,18 @@ curl -fsSL https://raw.githubusercontent.com/mehdisec/CyberSentinel/main/install
 
 ---
 
+### 🔐 Default Access & Anti-Brute-Force Protection
+
+| Setting | Default Value | Notes |
+| :--- | :--- | :--- |
+| **Initial Username** | `admin` | Configured in `/etc/cybersentinel/config.json` |
+| **Initial Password** | `admin` | Factory default credentials |
+| **First-Login Policy** | **Mandatory Password Change** | UI strictly enforces changing the default password upon initial sign-in before granting access |
+| **Brute-Force Defense** | **Active (Anti-Lockout Matrix)** | 5 failed attempts within 5 minutes triggers an automatic 300-second IP lockout with progressive cooldown |
+| **Session Security** | **Cryptographic Bearer Tokens** | Authenticated sessions with PBKDF2-HMAC-SHA256 password cryptography and secured WebSocket streaming |
+
+---
+
 ### Option 2: Manual / Developer Setup
 
 ```bash

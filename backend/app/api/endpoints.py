@@ -7,7 +7,16 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, Request, HTTPException, status
 
 from backend.app.core.config import settings
-from backend.app.core.security import verify_auth_token, get_client_ip, check_rate_limit, dispatch_alert
+from backend.app.core.security import (
+    verify_auth_token,
+    get_client_ip,
+    check_rate_limit,
+    dispatch_alert,
+    login_limiter,
+    verify_password,
+    create_session,
+    revoke_session,
+)
 from backend.app.modules.network import (
     bandwidth_tracker,
     get_active_sockets,
@@ -26,12 +35,161 @@ from backend.app.modules.logs import query_logs
 from backend.app.modules.telemetry import get_full_overview
 
 logger = logging.getLogger("cybersentinel.api")
+
+# Protected API Router (enforces verify_auth_token when auth_enabled is True)
 router = APIRouter(prefix="/api", dependencies=[Depends(verify_auth_token)])
 
+# Public Authentication Router (login, logout, status, password-change)
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
+
 
 # ==========================================
-# Pydantic Request Models
+# Authentication & Pydantic Request Models
 # ==========================================
+class LoginRequest(BaseModel):
+    username: str = Field(..., description="Administrator username")
+    password: str = Field(..., description="Administrator password")
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., description="Current administrator password")
+    new_password: str = Field(..., min_length=6, description="New administrator password (min 6 chars)")
+
+
+# ==========================================
+# Authentication Endpoints
+# ==========================================
+@auth_router.get("/status")
+def get_auth_status(request: Request):
+    """Returns current authentication requirements and brute-force lockout status for client IP."""
+    client_ip = get_client_ip(request)
+    limiter_status = login_limiter.get_status(client_ip)
+    return {
+        "auth_enabled": settings.auth_enabled,
+        "must_change_password": settings.must_change_password,
+        "username": settings.admin_username,
+        "client_ip": client_ip,
+        "locked": limiter_status["locked"],
+        "retry_after": limiter_status["retry_after"],
+        "remaining_attempts": limiter_status["remaining_attempts"],
+    }
+
+
+@auth_router.post("/login")
+def auth_login(req: LoginRequest, request: Request):
+    """
+    Operator login endpoint protected by anti-brute-force rate limiting.
+    Locks out repeated attackers with progressive cooldowns.
+    """
+    client_ip = get_client_ip(request)
+
+    # 1. Check if IP is currently in brute-force lockout
+    is_locked, remaining_seconds = login_limiter.is_locked(client_ip)
+    if is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed login attempts. IP temporarily locked out for {remaining_seconds}s.",
+            headers={"Retry-After": str(remaining_seconds)},
+        )
+
+    # 2. Verify credentials
+    user_ok = req.username == settings.admin_username
+    pass_ok = verify_password(req.password, settings.admin_password_hash, settings.admin_password_salt)
+
+    if not (user_ok and pass_ok):
+        is_locked_now, lockout_duration, remaining_attempts = login_limiter.record_failure(client_ip, req.username)
+        if is_locked_now:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Exceeded maximum failed attempts. IP temporarily locked out for {lockout_duration}s.",
+                headers={"Retry-After": str(lockout_duration)},
+            )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid username or password. {remaining_attempts} attempt(s) remaining before temporary lockout.",
+        )
+
+    # 3. Successful authentication: clear failure counters & issue session
+    login_limiter.record_success(client_ip)
+    token = create_session(settings.admin_username)
+    logger.info(f"[AUTH] User '{settings.admin_username}' logged in successfully from {client_ip}")
+
+    return {
+        "success": True,
+        "token": token,
+        "username": settings.admin_username,
+        "must_change_password": settings.must_change_password,
+    }
+
+
+@auth_router.post("/change-password")
+def auth_change_password(req: ChangePasswordRequest, request: Request):
+    """
+    Mandatory password change upon initial login or manual operator update.
+    Validates current password and updates hash with fresh salt.
+    """
+    client_ip = get_client_ip(request)
+
+    # Check lockout
+    is_locked, remaining_seconds = login_limiter.is_locked(client_ip)
+    if is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"IP temporarily locked out. Try again in {remaining_seconds}s.",
+        )
+
+    # Verify current password
+    if not verify_password(req.current_password, settings.admin_password_hash, settings.admin_password_salt):
+        login_limiter.record_failure(client_ip, "password-change")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+
+    # Validate new password
+    if len(req.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be at least 6 characters long.",
+        )
+    if req.new_password.lower() == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be 'admin'. Please choose a stronger password.",
+        )
+    if req.new_password == req.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be the same as the current password.",
+        )
+
+    # Apply new password
+    settings.set_admin_password(req.new_password)
+    login_limiter.record_success(client_ip)
+    new_token = create_session(settings.admin_username)
+
+    logger.info(f"[AUTH] Administrator password updated successfully by operator from {client_ip}")
+
+    return {
+        "success": True,
+        "token": new_token,
+        "message": "Administrator password successfully updated. SOC panel secured.",
+    }
+
+
+@auth_router.post("/logout")
+def auth_logout(request: Request):
+    """Invalidates active session token."""
+    token = None
+    auth_header = request.headers.get("authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1]
+    elif "token" in request.query_params:
+        token = request.query_params.get("token")
+
+    if token:
+        revoke_session(token)
+    return {"success": True}
 class BlockIPRequest(BaseModel):
     ip: str = Field(..., description="IPv4 or IPv6 address to drop")
     duration: int = Field(0, description="Duration in seconds (0 = permanent, 3600 = 1h, 86400 = 24h)")
@@ -350,6 +508,8 @@ def get_settings():
             "host": settings.host,
             "port": settings.port,
             "auth_enabled": settings.auth_enabled,
+            "admin_username": settings.admin_username,
+            "must_change_password": settings.must_change_password,
             "admin_token_set": bool(settings.admin_token),
         },
         "alerts": cfg.get("alerts", {}),

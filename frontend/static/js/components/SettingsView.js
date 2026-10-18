@@ -14,6 +14,12 @@ const SettingsView = {
       newAdminToken: '',
       loading: false,
       saving: false,
+      changePwd: {
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+        loading: false,
+      },
     };
   },
   template: `
@@ -175,6 +181,52 @@ const SettingsView = {
             />
             <span class="text-[10px] text-slate-500 block mt-1">Used for Bearer authorization header or ?token= query parameter</span>
           </div>
+
+          <!-- Update Administrator Password Section -->
+          <div class="pt-4 border-t border-slate-800 space-y-3">
+            <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="key" class="w-3.5 h-3.5 text-amber-400"></i>
+              Update Operator Password
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Current Password</label>
+                <input
+                  v-model="changePwd.currentPassword"
+                  type="password"
+                  placeholder="Current password"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">New Password (min 6 chars)</label>
+                <input
+                  v-model="changePwd.newPassword"
+                  type="password"
+                  placeholder="New password"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Confirm New Password</label>
+                <input
+                  v-model="changePwd.confirmPassword"
+                  type="password"
+                  placeholder="Confirm new password"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              @click="updatePassword"
+              :disabled="changePwd.loading"
+              class="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+              <span>{{ changePwd.loading ? 'Updating...' : 'Apply New Password' }}</span>
+            </button>
+          </div>
         </div>
 
         <!-- Save Button -->
@@ -282,6 +334,52 @@ const SettingsView = {
         }
       } catch (e) {
         this.$emit('show-toast', 'Error testing webhook', 'error');
+      }
+    },
+    async updatePassword() {
+      if (!this.changePwd.currentPassword) {
+        this.$emit('show-toast', 'Please enter your current password', 'warning');
+        return;
+      }
+      if (!this.changePwd.newPassword || this.changePwd.newPassword.length < 6) {
+        this.$emit('show-toast', 'New password must be at least 6 characters', 'warning');
+        return;
+      }
+      if (this.changePwd.newPassword.toLowerCase() === 'admin') {
+        this.$emit('show-toast', 'Password cannot be "admin". Choose a secure password.', 'warning');
+        return;
+      }
+      if (this.changePwd.newPassword !== this.changePwd.confirmPassword) {
+        this.$emit('show-toast', 'New password and confirmation do not match', 'warning');
+        return;
+      }
+
+      this.changePwd.loading = true;
+      try {
+        const res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            current_password: this.changePwd.currentPassword,
+            new_password: this.changePwd.newPassword,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          if (data.token) {
+            localStorage.setItem('cybersentinel_token', data.token);
+          }
+          this.$emit('show-toast', 'Administrator password updated successfully!', 'success');
+          this.changePwd.currentPassword = '';
+          this.changePwd.newPassword = '';
+          this.changePwd.confirmPassword = '';
+        } else {
+          this.$emit('show-toast', data.detail || 'Failed to update administrator password', 'error');
+        }
+      } catch (e) {
+        this.$emit('show-toast', 'Error communicating with security daemon', 'error');
+      } finally {
+        this.changePwd.loading = false;
       }
     }
   },

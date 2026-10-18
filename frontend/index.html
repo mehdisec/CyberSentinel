@@ -30,6 +30,29 @@
       }
     }
   </script>
+
+  <!-- Global Fetch Interceptor for Authentication -->
+  <script>
+    const _origFetch = window.fetch;
+    window.fetch = async function(url, options = {}) {
+      options.headers = options.headers || {};
+      const token = localStorage.getItem('cybersentinel_token');
+      if (token && typeof url === 'string' && url.startsWith('/api') && !url.includes('/api/auth/login')) {
+        if (options.headers instanceof Headers) {
+          if (!options.headers.has('Authorization')) {
+            options.headers.set('Authorization', 'Bearer ' + token);
+          }
+        } else if (!options.headers['Authorization']) {
+          options.headers['Authorization'] = 'Bearer ' + token;
+        }
+      }
+      const response = await _origFetch(url, options);
+      if (response.status === 401 && typeof url === 'string' && url.startsWith('/api') && !url.includes('/api/auth/')) {
+        window.dispatchEvent(new CustomEvent('cybersentinel:unauthorized'));
+      }
+      return response;
+    };
+  </script>
 </head>
 <body class="bg-[#070b13] text-slate-200 min-h-screen flex flex-col antialiased selection:bg-blue-600 selection:text-white">
   <div id="app" class="flex-1 flex flex-col min-h-screen">
@@ -88,6 +111,21 @@
         >
           <i :data-lucide="isDark ? 'sun' : 'moon'" class="w-4 h-4"></i>
         </button>
+
+        <!-- User Identity & Logout Button -->
+        <div v-if="isAuthenticated && authEnabled" class="flex items-center gap-2 pl-3 border-l border-slate-800">
+          <div class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-300">
+            <i data-lucide="user-check" class="w-3.5 h-3.5 text-cyan-400"></i>
+            <span class="font-mono font-bold text-[11px]">{{ currentUsername }}</span>
+          </div>
+          <button
+            @click="logout"
+            title="Sign Out of CyberSentinel"
+            class="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition flex items-center justify-center cursor-pointer"
+          >
+            <i data-lucide="log-out" class="w-4 h-4"></i>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -417,6 +455,183 @@
             {{ fimModal.loading ? 'Hashing...' : 'Update Baseline' }}
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- 5. AUTHENTICATION LOGIN OVERLAY -->
+    <div
+      v-if="!isAuthenticated && authEnabled && !authLoading"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#070b13] overflow-y-auto"
+    >
+      <div class="relative w-full max-w-md bg-[#0c1322] border border-slate-800 rounded-3xl p-8 shadow-2xl shadow-blue-950/60 space-y-6">
+        <!-- Logo & Branding -->
+        <div class="text-center space-y-2">
+          <div class="inline-flex w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-cyan-500 p-0.5 shadow-xl shadow-blue-500/20">
+            <div class="w-full h-full bg-[#0a0f1d] rounded-[14px] flex items-center justify-center">
+              <i data-lucide="shield" class="w-8 h-8 text-cyan-400"></i>
+            </div>
+          </div>
+          <h2 class="text-xl font-extrabold tracking-tight text-white uppercase font-sans">CyberSentinel</h2>
+          <p class="text-xs text-slate-400">Linux Cybersecurity Monitoring & Defense Panel</p>
+        </div>
+
+        <!-- Brute-Force Lockout Notice (HTTP 429) -->
+        <div v-if="loginState.isLocked" class="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs space-y-2">
+          <div class="flex items-center gap-2 font-bold text-rose-400">
+            <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            <span>Brute-Force Protection Triggered</span>
+          </div>
+          <p class="text-rose-200/90 leading-relaxed">
+            Too many failed sign-in attempts from your IP. Temporary security lockout active for:
+          </p>
+          <div class="text-lg font-mono font-extrabold text-rose-300 flex items-center gap-2">
+            <i data-lucide="clock" class="w-4 h-4"></i>
+            <span>{{ formatCountdown(loginState.retryAfter) }}</span>
+          </div>
+        </div>
+
+        <!-- Error Alert (Wrong Credentials / Attempts Remaining) -->
+        <div v-else-if="loginState.error" class="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
+          <i data-lucide="alert-circle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
+          <span>{{ loginState.error }}</span>
+        </div>
+
+        <!-- Sign-In Form -->
+        <form @submit.prevent="submitLogin" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Operator Username</label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <i data-lucide="user" class="w-4 h-4"></i>
+              </div>
+              <input
+                v-model="loginForm.username"
+                type="text"
+                required
+                :disabled="loginState.isLocked || loginState.loading"
+                class="w-full bg-[#080d19] border border-slate-700/80 rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition disabled:opacity-50 font-mono"
+                placeholder="admin"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">Security Password</label>
+            <div class="relative">
+              <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <i data-lucide="lock" class="w-4 h-4"></i>
+              </div>
+              <input
+                v-model="loginForm.password"
+                :type="showPassword ? 'text' : 'password'"
+                required
+                :disabled="loginState.isLocked || loginState.loading"
+                class="w-full bg-[#080d19] border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition disabled:opacity-50"
+                placeholder="Enter operator password"
+              />
+              <button
+                type="button"
+                @click="showPassword = !showPassword"
+                class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
+              >
+                <i :data-lucide="showPassword ? 'eye-off' : 'eye'" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            :disabled="loginState.isLocked || loginState.loading"
+            class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+          >
+            <i v-if="!loginState.loading" data-lucide="log-in" class="w-4 h-4"></i>
+            <span>{{ loginState.loading ? 'Authenticating...' : 'Sign In to SOC Panel' }}</span>
+          </button>
+        </form>
+
+        <!-- Initial Credential Guide -->
+        <div class="pt-3 border-t border-slate-800 text-center space-y-1">
+          <div class="text-[11px] text-slate-400">
+            Initial Access: <code class="font-mono text-cyan-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">admin / admin</code>
+          </div>
+          <div class="text-[10px] text-slate-500">
+            Mandatory password change enforced immediately upon first sign-in.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. MANDATORY FIRST-LOGIN PASSWORD CHANGE MODAL -->
+    <div
+      v-if="isAuthenticated && mustChangePassword"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto"
+    >
+      <div class="relative w-full max-w-md bg-[#0c1322] border border-amber-500/40 rounded-3xl p-7 shadow-2xl shadow-amber-950/60 space-y-5">
+        <div class="flex items-center gap-3">
+          <div class="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+            <i data-lucide="key-round" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-extrabold text-white">Security Action Required</h3>
+            <p class="text-[11px] text-amber-300 font-medium">Default Password Detected ('admin')</p>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-300 leading-relaxed">
+          For defense hardening, you must replace the default factory password with a private administrator password before accessing the CyberSentinel panel.
+        </p>
+
+        <!-- Error Alert -->
+        <div v-if="pwdForm.error" class="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+          <i data-lucide="alert-triangle" class="w-4 h-4 text-rose-400 shrink-0 mt-0.5"></i>
+          <span>{{ pwdForm.error }}</span>
+        </div>
+
+        <form @submit.prevent="submitPasswordChange" class="space-y-3.5">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Current Password</label>
+            <input
+              v-model="pwdForm.currentPassword"
+              type="password"
+              required
+              class="w-full bg-[#080d19] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+              placeholder="admin"
+            />
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">New Password (minimum 6 characters)</label>
+            <input
+              v-model="pwdForm.newPassword"
+              type="password"
+              required
+              minlength="6"
+              class="w-full bg-[#080d19] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+              placeholder="Enter secure new password"
+            />
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">Confirm New Password</label>
+            <input
+              v-model="pwdForm.confirmPassword"
+              type="password"
+              required
+              minlength="6"
+              class="w-full bg-[#080d19] border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+              placeholder="Re-enter secure new password"
+            />
+          </div>
+
+          <button
+            type="submit"
+            :disabled="pwdForm.loading"
+            class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white text-xs font-bold shadow-lg shadow-amber-600/30 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+          >
+            <i v-if="!pwdForm.loading" data-lucide="shield-check" class="w-4 h-4"></i>
+            <span>{{ pwdForm.loading ? 'Securing Panel...' : 'Save Password & Unlock SOC Panel' }}</span>
+          </button>
+        </form>
       </div>
     </div>
 
